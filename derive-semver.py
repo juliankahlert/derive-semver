@@ -549,68 +549,71 @@ def resolve_semver(
     current_branch = get_current_branch(cwd=cwd)
     sanitized_branch = sanitize_branch_name(current_branch, active_config)
     default_branch = active_config["versioning"]["default_branch"]
-    merge_base = get_merge_base(default_branch, cwd=cwd)
-    distance_from_default_branch = _count_commits_since_ref(
-        merge_base,
-        root_commit=root_commit,
-        cwd=cwd,
-    )
 
     base_tag = _select_base_semantic_tag(active_config, cwd=cwd)
     default_version = active_config["default_version"]
-    minor_strategy = active_config["versioning"]["minor_strategy"]
-
-    if minor_strategy not in {"commits", "merges"}:
-        raise ValueError(
-            "config.versioning.minor_strategy must be either 'commits' or 'merges'."
-        )
 
     base_major = base_tag.major if base_tag is not None else default_version["major"]
     base_minor = base_tag.minor if base_tag is not None else default_version["minor"]
+    base_patch = base_tag.patch if base_tag is not None else default_version["patch"]
 
     commits_since_base = _count_commits_since_ref(
         base_tag.original_tag if base_tag is not None else None,
         root_commit=root_commit,
         cwd=cwd,
     )
-    merge_commits_since_base = _count_merge_commits_since_ref(
-        base_tag.original_tag if base_tag is not None else None,
-        root_commit=root_commit,
-        cwd=cwd,
-    )
-
-    if minor_strategy == "commits":
-        derived_minor = base_minor + commits_since_base
-        derived_patch = 0
-    else:
-        derived_minor = base_minor + merge_commits_since_base
-        if current_branch == default_branch:
-            last_merge_commit = _get_last_merge_commit(root_commit=root_commit, cwd=cwd)
-            if last_merge_commit is None:
-                derived_patch = commits_since_base
-            else:
-                derived_patch = _count_commits_since_ref(
-                    last_merge_commit,
-                    root_commit=root_commit,
-                    cwd=cwd,
-                )
-        else:
-            derived_patch = commits_since_base
 
     pre_release = _build_derived_pre_release(
         current_branch=current_branch,
         default_branch=default_branch,
         sanitized_branch=sanitized_branch,
-        distance_from_default_branch=distance_from_default_branch,
+        distance_from_base_tag=commits_since_base,
         is_dirty=is_dirty,
     )
     return build_normalized_tag(
         major=base_major,
-        minor=derived_minor,
-        patch=derived_patch,
+        minor=base_minor,
+        patch=base_patch,
         pre_release=pre_release,
         build_metadata=build_metadata,
     )
+
+
+def resolve_pre_release_semver(
+    config: Optional[Mapping[str, Any]] = None,
+    cwd: Optional[Union[str, Path]] = None,
+) -> str:
+    """Resolve a release-candidate pre-release version for HEAD on the default branch."""
+
+    active_config = validate_config(DEFAULT_CONFIG if config is None else config)
+    default_branch = active_config["versioning"]["default_branch"]
+    current_branch = get_current_branch(cwd=cwd)
+    if current_branch != default_branch:
+        raise ValueError(
+            f"--use-pre-release requires being on the default branch '{default_branch}' "
+            f"(currently on '{current_branch}')."
+        )
+
+    root_commit = _resolve_root_commit(active_config.get("root_commit"), cwd=cwd)
+    short_hash = get_short_commit_hash(cwd=cwd)
+    build_metadata = _build_commit_build_metadata(short_hash, active_config)
+
+    base_tag = _select_base_semantic_tag(active_config, cwd=cwd)
+    commits_since_base = _count_commits_since_ref(
+        base_tag.original_tag if base_tag is not None else None,
+        root_commit=root_commit,
+        cwd=cwd,
+    )
+
+    next_tag = resolve_compute_tag(config=active_config, cwd=cwd)
+    tag_prefix = active_config["tag_prefix"]
+    next_core = (
+        next_tag[len(tag_prefix):]
+        if tag_prefix and next_tag.startswith(tag_prefix)
+        else next_tag
+    )
+
+    return f"{next_core}-rc.{commits_since_base}+{build_metadata}"
 
 
 def resolve_compute_tag(
@@ -650,6 +653,7 @@ def resolve_compute_tag(
 
     base_major = base_tag.major if base_tag is not None else default_version["major"]
     base_minor = base_tag.minor if base_tag is not None else default_version["minor"]
+    base_patch = base_tag.patch if base_tag is not None else default_version["patch"]
 
     commits_since_base = _count_commits_since_ref(
         base_tag.original_tag if base_tag is not None else None,
@@ -669,7 +673,9 @@ def resolve_compute_tag(
         derived_patch = 0
     else:
         derived_minor = base_minor + merge_commits_since_base
-        if _is_commit_on_first_parent_chain(
+        if merge_commits_since_base == 0:
+            derived_patch = base_patch + commits_since_base
+        elif _is_commit_on_first_parent_chain(
             resolved_target_ref,
             default_branch,
             cwd=cwd,
@@ -680,7 +686,7 @@ def resolve_compute_tag(
                 cwd=cwd,
             )
             if last_merge_commit is None:
-                derived_patch = commits_since_base
+                derived_patch = base_patch + commits_since_base
             else:
                 derived_patch = _count_commits_since_ref(
                     last_merge_commit,
@@ -689,7 +695,7 @@ def resolve_compute_tag(
                     cwd=cwd,
                 )
         else:
-            derived_patch = commits_since_base
+            derived_patch = base_patch + commits_since_base
 
     version_core = f"{base_major}.{derived_minor}.{_clamp_distance(derived_patch)}"
     return f"{active_config['tag_prefix']}{version_core}"
@@ -1162,14 +1168,14 @@ def _build_derived_pre_release(
     current_branch: str,
     default_branch: str,
     sanitized_branch: str,
-    distance_from_default_branch: int,
+    distance_from_base_tag: int,
     is_dirty: bool,
 ) -> Optional[str]:
     """Build derived pre-release text for non-tagged versions."""
 
     parts: list[str] = []
-    if not (current_branch == default_branch and distance_from_default_branch == 0):
-        parts.append(f"{sanitized_branch}.{distance_from_default_branch}")
+    if not (current_branch == default_branch and distance_from_base_tag == 0):
+        parts.append(f"{sanitized_branch}.{distance_from_base_tag}")
     if is_dirty:
         parts.append("dirty")
     return ".".join(parts) or None
@@ -1485,6 +1491,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         metavar="sha_or_ref",
         help=argparse.SUPPRESS,
     )
+    mode_group.add_argument(
+        "--use-pre-release",
+        action="store_true",
+        help="Emit a release-candidate pre-release of the next computed tag "
+        "(requires being on the default branch).",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -1518,6 +1530,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     config=config, cwd=repo_root, target_ref=compute_tag_target
                 )
             )
+        elif args.use_pre_release:
+            print(resolve_pre_release_semver(config=config, cwd=repo_root))
         elif args.tag is not None:
             if args.dry_run:
                 computed_tag, target_commit = plan_lightweight_tag(
@@ -1573,6 +1587,7 @@ __all__ = [
     "resolve_compute_tag",
     "resolve_target_commit",
     "resolve_next_tag",
+    "resolve_pre_release_semver",
     "resolve_semver",
     "run_git",
     "sanitize_branch_name",
