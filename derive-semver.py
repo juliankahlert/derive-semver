@@ -17,6 +17,8 @@ from typing import Any, Dict, Mapping, Optional, Pattern, Sequence, Union
 import yaml
 
 
+__version__ = "__VERSION_PLACEHOLDER__"
+
 DEFAULT_CONFIG = {
     "tag_prefix": "v",
     "tag_regex": r"^v?(?P<version_core>\d+\.\d+\.\d+)(?:-(?P<pre_release>[0-9A-Za-z.-]+))?(?:\+(?P<build_metadata>[0-9A-Za-z.-]+))?$",
@@ -1365,6 +1367,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse CLI arguments for semantic version derivation."""
 
     parser = argparse.ArgumentParser(description="Derive a semantic version for the current repository.")
+    parser.add_argument(
+        "--version",
+        "-v",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     parser.add_argument("--tag-regex")
     parser.add_argument("--tag-prefix")
     parser.add_argument("--default-major", type=non_negative_int)
@@ -1462,6 +1470,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 __all__ = [
+    "__version__",
     "DEFAULT_CONFIG",
     "DEFAULT_CONFIG_PATH",
     "ENVIRONMENT_VARIABLE_NAMES",
