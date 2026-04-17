@@ -290,16 +290,52 @@ def load_env_config(env: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
 
     env_specs = (
         (ENVIRONMENT_VARIABLE_NAMES["tag_regex"], ("tag_regex",), _parse_env_string),
-        (ENVIRONMENT_VARIABLE_NAMES["default_version.major"], ("default_version", "major"), _parse_env_non_negative_int),
-        (ENVIRONMENT_VARIABLE_NAMES["default_version.minor"], ("default_version", "minor"), _parse_env_non_negative_int),
-        (ENVIRONMENT_VARIABLE_NAMES["default_version.patch"], ("default_version", "patch"), _parse_env_non_negative_int),
-        (ENVIRONMENT_VARIABLE_NAMES["versioning.minor_strategy"], ("versioning", "minor_strategy"), _parse_env_minor_strategy),
-        (ENVIRONMENT_VARIABLE_NAMES["versioning.default_branch"], ("versioning", "default_branch"), _parse_env_string),
-        (ENVIRONMENT_VARIABLE_NAMES["pre_release.sanitize_pattern"], ("pre_release", "sanitize_pattern"), _parse_env_string),
-        (ENVIRONMENT_VARIABLE_NAMES["pre_release.separator"], ("pre_release", "separator"), _parse_env_string),
-        (ENVIRONMENT_VARIABLE_NAMES["root_commit"], ("root_commit",), _parse_env_non_empty_string),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["default_version.major"],
+            ("default_version", "major"),
+            _parse_env_non_negative_int,
+        ),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["default_version.minor"],
+            ("default_version", "minor"),
+            _parse_env_non_negative_int,
+        ),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["default_version.patch"],
+            ("default_version", "patch"),
+            _parse_env_non_negative_int,
+        ),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["versioning.minor_strategy"],
+            ("versioning", "minor_strategy"),
+            _parse_env_minor_strategy,
+        ),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["versioning.default_branch"],
+            ("versioning", "default_branch"),
+            _parse_env_string,
+        ),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["pre_release.sanitize_pattern"],
+            ("pre_release", "sanitize_pattern"),
+            _parse_env_string,
+        ),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["pre_release.separator"],
+            ("pre_release", "separator"),
+            _parse_env_string,
+        ),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["root_commit"],
+            ("root_commit",),
+            _parse_env_non_empty_string,
+        ),
         (ENVIRONMENT_VARIABLE_NAMES["tag_prefix"], ("tag_prefix",), _parse_env_string),
-        (ENVIRONMENT_VARIABLE_NAMES["build_metadata.date_time"], ("build_metadata", "date_time"), _parse_env_bool),
+        (
+            ENVIRONMENT_VARIABLE_NAMES["build_metadata.date_time"],
+            ("build_metadata", "date_time"),
+            _parse_env_bool,
+        ),
     )
 
     for env_name, key_path, parser in env_specs:
@@ -334,7 +370,9 @@ def deep_merge(
     return merged
 
 
-def validate_config(config: Mapping[str, Any], source: str = "config") -> Dict[str, Any]:
+def validate_config(
+    config: Mapping[str, Any], source: str = "config"
+) -> Dict[str, Any]:
     """Validate semantic version configuration shape and values."""
 
     if not isinstance(config, Mapping):
@@ -352,7 +390,9 @@ def validate_config(config: Mapping[str, Any], source: str = "config") -> Dict[s
     _require_non_negative_int(default_version, "minor", f"{source}.default_version")
     _require_non_negative_int(default_version, "patch", f"{source}.default_version")
 
-    minor_strategy = _require_string(versioning, "minor_strategy", f"{source}.versioning")
+    minor_strategy = _require_string(
+        versioning, "minor_strategy", f"{source}.versioning"
+    )
     if minor_strategy not in {"commits", "merges"}:
         raise ValueError(
             f"{source}.versioning.minor_strategy must be either 'commits' or 'merges'."
@@ -663,7 +703,11 @@ def resolve_target_commit(
 ) -> str:
     """Resolve an optional target ref to a commit SHA."""
 
-    normalized_target_ref = "HEAD" if target_ref is None else _require_non_empty_string(target_ref, ref_name)
+    normalized_target_ref = (
+        "HEAD"
+        if target_ref is None
+        else _require_non_empty_string(target_ref, ref_name)
+    )
     try:
         return run_git(
             ["rev-parse", "--verify", f"{normalized_target_ref}^{{commit}}"],
@@ -705,7 +749,9 @@ def plan_lightweight_tag(
 ) -> tuple[str, str]:
     """Resolve the computed tag name and target commit without creating a tag."""
 
-    target_commit = resolve_target_commit(target_ref=target_ref, cwd=cwd, ref_name="tag")
+    target_commit = resolve_target_commit(
+        target_ref=target_ref, cwd=cwd, ref_name="tag"
+    )
     computed_tag = resolve_compute_tag(config=config, cwd=cwd, target_ref=target_commit)
     if _tag_exists(computed_tag, cwd=cwd):
         raise ValueError(f"tag '{computed_tag}' already exists.")
@@ -1026,17 +1072,27 @@ def _is_commit_on_first_parent_chain(
 
     try:
         resolved_target_ref = run_git(
-            ["rev-parse", "--verify", f"{_require_non_empty_string(target_ref, 'target_ref')}^{{commit}}"],
+            [
+                "rev-parse",
+                "--verify",
+                f"{_require_non_empty_string(target_ref, 'target_ref')}^{{commit}}",
+            ],
             cwd=cwd,
         )
         first_parent_history = run_git(
-            ["rev-list", "--first-parent", _require_non_empty_string(branch_ref, "branch_ref")],
+            [
+                "rev-list",
+                "--first-parent",
+                _require_non_empty_string(branch_ref, "branch_ref"),
+            ],
             cwd=cwd,
         )
     except GitCommandError:
         return False
 
-    return resolved_target_ref in {line for line in first_parent_history.splitlines() if line}
+    return resolved_target_ref in {
+        line for line in first_parent_history.splitlines() if line
+    }
 
 
 def _get_parent_refs(
@@ -1112,9 +1168,7 @@ def _build_derived_pre_release(
     """Build derived pre-release text for non-tagged versions."""
 
     parts: list[str] = []
-    if not (
-        current_branch == default_branch and distance_from_default_branch == 0
-    ):
+    if not (current_branch == default_branch and distance_from_default_branch == 0):
         parts.append(f"{sanitized_branch}.{distance_from_default_branch}")
     if is_dirty:
         parts.append("dirty")
@@ -1163,7 +1217,13 @@ def _tag_exists(
     """Return whether a tag ref already exists."""
 
     completed = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{_require_non_empty_string(tag_name, 'tag_name')}"],
+        [
+            "git",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"refs/tags/{_require_non_empty_string(tag_name, 'tag_name')}",
+        ],
         cwd=Path(cwd) if cwd is not None else None,
         check=False,
         capture_output=True,
@@ -1213,9 +1273,7 @@ def _parse_git_int(raw_value: str, description: str) -> int:
         ) from exc
 
     if parsed_value < 0:
-        raise RuntimeError(
-            f"Git returned a negative {description}: {raw_value!r}"
-        )
+        raise RuntimeError(f"Git returned a negative {description}: {raw_value!r}")
 
     return parsed_value
 
@@ -1251,7 +1309,9 @@ def _parse_env_non_empty_string(raw_value: str, env_name: str) -> str:
     try:
         return _require_non_empty_string(raw_value, f"Environment variable {env_name}")
     except ValueError as exc:
-        raise ValueError(f"Environment variable {env_name} must be a non-empty string.") from exc
+        raise ValueError(
+            f"Environment variable {env_name} must be a non-empty string."
+        ) from exc
 
 
 def _parse_env_non_negative_int(raw_value: str, env_name: str) -> int:
@@ -1366,7 +1426,9 @@ def _require_optional_string(value: Any, context: str) -> Optional[str]:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse CLI arguments for semantic version derivation."""
 
-    parser = argparse.ArgumentParser(description="Derive a semantic version for the current repository.")
+    parser = argparse.ArgumentParser(
+        description="Derive a semantic version for the current repository."
+    )
     parser.add_argument(
         "--version",
         "-v",
@@ -1447,9 +1509,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             config = deep_merge(config, override_config, path="cli")
         config = validate_config(config)
 
-        compute_tag_target = args.compute_tag if args.compute_tag is not None else args.next_tag
+        compute_tag_target = (
+            args.compute_tag if args.compute_tag is not None else args.next_tag
+        )
         if compute_tag_target is not None:
-            print(resolve_compute_tag(config=config, cwd=repo_root, target_ref=compute_tag_target))
+            print(
+                resolve_compute_tag(
+                    config=config, cwd=repo_root, target_ref=compute_tag_target
+                )
+            )
         elif args.tag is not None:
             if args.dry_run:
                 computed_tag, target_commit = plan_lightweight_tag(
@@ -1459,7 +1527,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
                 print(f"Would create tag {computed_tag} at {target_commit}")
             else:
-                print(create_lightweight_tag(config=config, cwd=repo_root, target_ref=args.tag))
+                print(
+                    create_lightweight_tag(
+                        config=config, cwd=repo_root, target_ref=args.tag
+                    )
+                )
         else:
             print(resolve_semver(config=config, cwd=repo_root))
     except Exception as exc:
