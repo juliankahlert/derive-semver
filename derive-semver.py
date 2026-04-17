@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Julian Kahlert
 """Executable CLI for semantic version derivation."""
 
 from __future__ import annotations
@@ -525,32 +527,50 @@ def sanitize_branch_name(branch_name: str, config: Mapping[str, Any]) -> str:
 def resolve_semver(
     config: Optional[Mapping[str, Any]] = None,
     cwd: Optional[Union[str, Path]] = None,
+    target_ref: Optional[str] = None,
 ) -> str:
-    """Resolve a deterministic semantic version for HEAD."""
+    """Resolve a deterministic semantic version for HEAD or a target ref."""
 
     active_config = validate_config(DEFAULT_CONFIG if config is None else config)
-    root_commit = _resolve_root_commit(active_config.get("root_commit"), cwd=cwd)
-    short_hash = get_short_commit_hash(cwd=cwd)
+    is_head = target_ref is None or target_ref == "HEAD"
+    resolved_target = resolve_target_commit(
+        target_ref=target_ref, cwd=cwd, ref_name="target"
+    )
+    root_commit = _resolve_root_commit(
+        active_config.get("root_commit"),
+        descendant_ref=resolved_target,
+        cwd=cwd,
+    )
+    short_hash = run_git(["rev-parse", "--short", resolved_target], cwd=cwd)
     build_metadata = _build_commit_build_metadata(short_hash, active_config)
-    is_dirty = is_working_tree_dirty(cwd=cwd)
+    is_dirty = is_working_tree_dirty(cwd=cwd) if is_head else False
 
-    head_tags = _parse_semantic_tags(list_tags_on_head(cwd=cwd), config=active_config)
-    if head_tags:
-        head_tag = head_tags[0]
+    target_tags = _parse_semantic_tags(
+        _list_tags_pointing_at(resolved_target, cwd=cwd),
+        config=active_config,
+    )
+    if target_tags:
+        target_tag = target_tags[0]
         pre_release = "dirty" if is_dirty else None
         return build_normalized_tag(
-            major=head_tag.major,
-            minor=head_tag.minor,
-            patch=head_tag.patch,
+            major=target_tag.major,
+            minor=target_tag.minor,
+            patch=target_tag.patch,
             pre_release=pre_release,
             build_metadata=build_metadata,
         )
 
-    current_branch = get_current_branch(cwd=cwd)
-    sanitized_branch = sanitize_branch_name(current_branch, active_config)
     default_branch = active_config["versioning"]["default_branch"]
+    current_branch = _resolve_branch_for_ref(
+        target_ref=target_ref,
+        default_branch=default_branch,
+        cwd=cwd,
+    )
+    sanitized_branch = sanitize_branch_name(current_branch, active_config)
 
-    base_tag = _select_base_semantic_tag(active_config, cwd=cwd)
+    base_tag = _select_base_semantic_tag(
+        active_config, cwd=cwd, target_ref=resolved_target
+    )
     default_version = active_config["default_version"]
 
     base_major = base_tag.major if base_tag is not None else default_version["major"]
@@ -559,6 +579,7 @@ def resolve_semver(
 
     commits_since_base = _count_commits_since_ref(
         base_tag.original_tag if base_tag is not None else None,
+        head_ref=resolved_target,
         root_commit=root_commit,
         cwd=cwd,
     )
@@ -577,6 +598,26 @@ def resolve_semver(
         pre_release=pre_release,
         build_metadata=build_metadata,
     )
+
+
+def _resolve_branch_for_ref(
+    target_ref: Optional[str],
+    default_branch: str,
+    cwd: Optional[Union[str, Path]] = None,
+) -> str:
+    """Determine the branch label to use for a target ref's pre-release."""
+
+    if target_ref is None or target_ref == "HEAD":
+        return get_current_branch(cwd=cwd)
+    try:
+        symbolic = run_git(
+            ["rev-parse", "--symbolic-full-name", target_ref], cwd=cwd
+        )
+    except GitCommandError:
+        symbolic = ""
+    if symbolic.startswith("refs/heads/"):
+        return symbolic[len("refs/heads/") :]
+    return default_branch
 
 
 def resolve_pre_release_semver(
@@ -1502,6 +1543,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Show the tag that would be created without creating it. Requires --tag.",
     )
+    parser.add_argument(
+        "sha_or_ref",
+        nargs="?",
+        default=None,
+        metavar="sha_or_ref",
+        help="Compute the post-release semver for this commit instead of HEAD.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1514,6 +1562,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args = parse_args(argv)
         if args.dry_run and args.tag is None:
             raise ValueError("--dry-run requires --tag.")
+        if args.sha_or_ref is not None and (
+            args.compute_tag is not None
+            or args.next_tag is not None
+            or args.tag is not None
+            or args.use_pre_release
+        ):
+            raise ValueError(
+                "positional sha_or_ref cannot be combined with --compute-tag, --tag, "
+                "--next-tag, or --use-pre-release."
+            )
 
         config = load_config(repo_root / DEFAULT_CONFIG_PATH)
         override_config = build_cli_override_config(args)
@@ -1547,7 +1605,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     )
                 )
         else:
-            print(resolve_semver(config=config, cwd=repo_root))
+            print(
+                resolve_semver(
+                    config=config, cwd=repo_root, target_ref=args.sha_or_ref
+                )
+            )
     except Exception as exc:
         print(f"Error deriving semantic version: {exc}", file=sys.stderr)
         return 1
