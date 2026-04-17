@@ -10,3 +10,21 @@ build:
 
 clean:
     rm -f derive-semver
+
+lint *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python_bin=".venv/bin/python"
+    if [[ ! -x "${python_bin}" ]]; then
+        python_bin="python3"
+    fi
+    "${python_bin}" -m ruff check . "$@"
+
+format *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python_bin=".venv/bin/python"
+    if [[ ! -x "${python_bin}" ]]; then
+        python_bin="python3"
+    fi
+    "${python_bin}" -m ruff format . "$@"
